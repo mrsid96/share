@@ -12,17 +12,20 @@ import type { TransferProgress, ReceivedFile } from '../types/transfer';
 import type { TransferStatus } from '../types/transfer';
 
 export type TransferRole = 'sender' | 'receiver' | null;
+export type ConnectionPhase = 'idle' | 'waiting-for-accept' | 'connecting-webrtc';
 
 interface UseTransferReturn {
   initiateTransfer: (files: File[], recipientUid: string) => Promise<void>;
   acceptIncoming: () => void;
   declineIncoming: () => void;
   cancelTransfer: () => void;
+  cancelConnecting: () => void;
   outgoingProgress: TransferProgress | null;
   incomingProgress: TransferProgress | null;
   outgoingStatus: TransferStatus | null;
   completedFiles: ReceivedFile[];
   role: TransferRole;
+  connectionPhase: ConnectionPhase;
   incomingConnectionId: string | null;
   incomingInitiatorUid: string | null;
   incomingOffer: RTCSessionDescriptionInit | null;
@@ -48,6 +51,7 @@ export function useTransfer(roomId: string): UseTransferReturn {
   const [outgoingStatus, setOutgoingStatus] = useState<TransferStatus | null>(null);
   const [completedFiles, setCompletedFiles] = useState<ReceivedFile[]>([]);
   const [role, setRole] = useState<TransferRole>(null);
+  const [connectionPhase, setConnectionPhase] = useState<ConnectionPhase>('idle');
   const [error, setError] = useState<string | null>(null);
   const [isConnecting, setIsConnecting] = useState(false);
   const [isCompleted, setIsCompleted] = useState(false);
@@ -76,6 +80,7 @@ export function useTransfer(roomId: string): UseTransferReturn {
     setOutgoingStatus(null);
     setCompletedFiles([]);
     setRole(null);
+    setConnectionPhase('idle');
     setError(null);
     setIsConnecting(false);
     setIsCompleted(false);
@@ -93,7 +98,7 @@ export function useTransfer(roomId: string): UseTransferReturn {
 
     const unsub = subscribeToIncomingConnections(roomId, user.uid, (conn) => {
       // Don't handle if already in an active transfer
-      if (peerConnectionRef.current) return;
+      if (peerConnectionRef.current || conn.status === 'rejected') return;
 
       setIncomingConnectionId(conn.connectionId);
       setIncomingInitiatorUid(conn.initiatorUid);
@@ -166,7 +171,11 @@ export function useTransfer(roomId: string): UseTransferReturn {
     if (!user) return;
     setRole('sender');
     setIsConnecting(true);
+    setConnectionPhase('waiting-for-accept');
     setError(null);
+
+    let webrtcTimer: number | null = null;
+    let acceptTimer: number | null = null;
 
     try {
       const pc = new PeerConnectionManager({
@@ -174,8 +183,26 @@ export function useTransfer(roomId: string): UseTransferReturn {
         role: 'initiator',
         localUid: user.uid,
         remoteUid: recipientUid,
+        onAnswerReceived: () => {
+          // Recipient accepted! Transition from waiting to direct WebRTC connection
+          if (acceptTimer) {
+            window.clearTimeout(acceptTimer);
+            acceptTimer = null;
+          }
+          setConnectionPhase('connecting-webrtc');
+
+          // Direct P2P connection timer
+          webrtcTimer = window.setTimeout(() => {
+            setError('Direct peer-to-peer connection could not be established. Please check network connectivity.');
+            setIsConnecting(false);
+            setOutgoingStatus('failed');
+            cleanup();
+          }, 35000);
+        },
         onConnectionStateChange: (state) => {
           if (state === 'failed' || state === 'closed') {
+            if (acceptTimer) window.clearTimeout(acceptTimer);
+            if (webrtcTimer) window.clearTimeout(webrtcTimer);
             setError('Connection failed. The devices could not connect directly.');
             setIsConnecting(false);
             setOutgoingStatus('failed');
@@ -194,21 +221,24 @@ export function useTransfer(roomId: string): UseTransferReturn {
 
       const { channel, connectionId } = await pc.startAsInitiator(filesMetadata, totalSize);
 
-      // Watchdog timeout: if channel doesn't open within 25 seconds, report timeout
-      const connectionTimer = window.setTimeout(() => {
-        if (channel.readyState !== 'open') {
-          setError('Connection timed out. Direct peer-to-peer connection could not be established.');
-          setIsConnecting(false);
-          setOutgoingStatus('failed');
-          cleanup();
-        }
-      }, 25000);
-      unsubscribersRef.current.push(() => window.clearTimeout(connectionTimer));
+      // Recipient response timeout (60 seconds to tap Accept on their screen)
+      acceptTimer = window.setTimeout(() => {
+        setError('Transfer request timed out. The recipient did not respond in time.');
+        setIsConnecting(false);
+        setOutgoingStatus('failed');
+        cleanup();
+      }, 60000);
 
-      // Listen for rejection or cancellation by recipient
+      unsubscribersRef.current.push(() => {
+        if (acceptTimer) window.clearTimeout(acceptTimer);
+        if (webrtcTimer) window.clearTimeout(webrtcTimer);
+      });
+
+      // Listen for rejection by recipient
       const unsubStatus = subscribeToConnection(roomId, connectionId, (conn) => {
         if (conn?.status === 'rejected') {
-          window.clearTimeout(connectionTimer);
+          if (acceptTimer) window.clearTimeout(acceptTimer);
+          if (webrtcTimer) window.clearTimeout(webrtcTimer);
           setError('Transfer was declined by the other device.');
           setIsConnecting(false);
           setOutgoingStatus('rejected');
@@ -217,8 +247,10 @@ export function useTransfer(roomId: string): UseTransferReturn {
       });
       unsubscribersRef.current.push(unsubStatus);
 
-      channel.onopen = () => {
-        window.clearTimeout(connectionTimer);
+      const handleChannelOpen = () => {
+        if (acceptTimer) window.clearTimeout(acceptTimer);
+        if (webrtcTimer) window.clearTimeout(webrtcTimer);
+        setConnectionPhase('idle');
         setIsConnecting(false);
         setOutgoingStatus('transferring');
         setupFileTransfer(channel, 'sender');
@@ -227,9 +259,18 @@ export function useTransfer(roomId: string): UseTransferReturn {
         currentTransferIdRef.current = transferId;
         setOutgoingStatus('pending');
       };
+
+      if (channel.readyState === 'open') {
+        handleChannelOpen();
+      } else {
+        channel.onopen = handleChannelOpen;
+      }
     } catch {
+      if (acceptTimer) window.clearTimeout(acceptTimer);
+      if (webrtcTimer) window.clearTimeout(webrtcTimer);
       setError('Failed to initiate connection. Please try again.');
       setIsConnecting(false);
+      setConnectionPhase('idle');
       setRole(null);
     }
   }, [user, roomId, setupFileTransfer, cleanup]);
@@ -238,7 +279,19 @@ export function useTransfer(roomId: string): UseTransferReturn {
     if (!user || !incomingConnectionId || !incomingOffer) return;
     setRole('receiver');
     setIsConnecting(true);
+    setConnectionPhase('connecting-webrtc');
     setHasIncoming(false);
+
+    let receiverTimer: number | null = window.setTimeout(() => {
+      setError('Direct peer-to-peer connection could not be established.');
+      setIsConnecting(false);
+      setConnectionPhase('idle');
+      cleanup();
+    }, 35000);
+
+    unsubscribersRef.current.push(() => {
+      if (receiverTimer) window.clearTimeout(receiverTimer);
+    });
 
     try {
       const pc = new PeerConnectionManager({
@@ -248,31 +301,30 @@ export function useTransfer(roomId: string): UseTransferReturn {
         localUid: user.uid,
         remoteUid: incomingInitiatorUid ?? '',
         onDataChannel: (channel) => {
+          if (receiverTimer) {
+            window.clearTimeout(receiverTimer);
+            receiverTimer = null;
+          }
           setIsConnecting(false);
+          setConnectionPhase('idle');
           setupFileTransfer(channel, 'receiver');
         },
         onConnectionStateChange: (state) => {
           if (state === 'failed' || state === 'closed') {
+            if (receiverTimer) window.clearTimeout(receiverTimer);
             setError('Connection failed. Could not establish direct P2P connection.');
             setIsConnecting(false);
+            setConnectionPhase('idle');
           }
         },
       });
       peerConnectionRef.current = pc;
       await pc.startAsRecipient(incomingOffer);
-
-      // Watchdog timeout for receiver as well
-      const receiverTimer = window.setTimeout(() => {
-        if (peerConnectionRef.current && peerConnectionRef.current.getConnectionState() !== 'connected') {
-          setError('Connection timed out. Direct P2P connection could not be established.');
-          setIsConnecting(false);
-          cleanup();
-        }
-      }, 25000);
-      unsubscribersRef.current.push(() => window.clearTimeout(receiverTimer));
     } catch {
+      if (receiverTimer) window.clearTimeout(receiverTimer);
       setError('Failed to accept connection.');
       setIsConnecting(false);
+      setConnectionPhase('idle');
       setRole(null);
     }
   }, [user, roomId, incomingConnectionId, incomingInitiatorUid, incomingOffer, setupFileTransfer, cleanup]);
@@ -287,6 +339,11 @@ export function useTransfer(roomId: string): UseTransferReturn {
     setIncomingOffer(null);
     setIncomingFiles([]);
   }, [roomId, incomingConnectionId]);
+
+  const cancelConnecting = useCallback(() => {
+    cleanup();
+    resetTransfer();
+  }, [cleanup, resetTransfer]);
 
   const cancelTransfer = useCallback(() => {
     const manager = fileTransferRef.current;
@@ -314,11 +371,13 @@ export function useTransfer(roomId: string): UseTransferReturn {
     acceptIncoming,
     declineIncoming,
     cancelTransfer,
+    cancelConnecting,
     outgoingProgress,
     incomingProgress,
     outgoingStatus,
     completedFiles,
     role,
+    connectionPhase,
     incomingConnectionId,
     incomingInitiatorUid,
     incomingOffer,

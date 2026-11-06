@@ -11,14 +11,17 @@ import {
 
 export type ConnectionRole = 'initiator' | 'recipient';
 
-// Multi-provider STUN pool for high reliability & ad-block resilience
+// Multi-provider STUN pool with candidate pre-fetching for instant NAT discovery
 const RTC_CONFIG: RTCConfiguration = {
   iceServers: [
-    { urls: 'stun:stun.cloudflare.com:3478' },
-    { urls: 'stun:stun.services.mozilla.com' },
     { urls: 'stun:stun.l.google.com:19302' },
     { urls: 'stun:stun1.l.google.com:19302' },
+    { urls: 'stun:stun2.l.google.com:19302' },
+    { urls: 'stun:stun.cloudflare.com:3478' },
+    { urls: 'stun:global.stun.twilio.com:3478' },
+    { urls: 'stun:stun.relay.metered.ca:80' },
   ],
+  iceCandidatePoolSize: 10,
   iceTransportPolicy: 'all',
 };
 
@@ -31,6 +34,7 @@ export interface PeerConnectionOptions {
   onDataChannel?: (channel: RTCDataChannel) => void;
   onConnectionStateChange?: (state: RTCPeerConnectionState) => void;
   onIceConnectionStateChange?: (state: RTCIceConnectionState) => void;
+  onAnswerReceived?: () => void;
 }
 
 export class PeerConnectionManager {
@@ -44,9 +48,13 @@ export class PeerConnectionManager {
   private dataChannelCallback?: (channel: RTCDataChannel) => void;
   private connectionStateCallback?: (state: RTCPeerConnectionState) => void;
   private iceStateCallback?: (state: RTCIceConnectionState) => void;
+  private answerReceivedCallback?: () => void;
 
-  // Buffer candidates generated before connectionId is resolved
+  // Buffer local candidates generated before connectionId is resolved in Firestore
   private pendingLocalCandidates: RTCIceCandidateInit[] = [];
+
+  // Buffer remote candidates received before remoteDescription is applied
+  private pendingRemoteCandidates: RTCIceCandidateInit[] = [];
 
   constructor(options: PeerConnectionOptions) {
     this.roomId = options.roomId;
@@ -57,6 +65,7 @@ export class PeerConnectionManager {
     this.dataChannelCallback = options.onDataChannel;
     this.connectionStateCallback = options.onConnectionStateChange;
     this.iceStateCallback = options.onIceConnectionStateChange;
+    this.answerReceivedCallback = options.onAnswerReceived;
 
     this.pc = new RTCPeerConnection(RTC_CONFIG);
     this.setupEventHandlers();
@@ -64,16 +73,24 @@ export class PeerConnectionManager {
 
   private setupEventHandlers(): void {
     this.pc.onicecandidate = async (event) => {
-      if (!event.candidate) return;
-      const candidateInit = event.candidate.toJSON();
-
-      if (!this.connectionId) {
-        // Buffer until connectionId is assigned by Firestore
-        this.pendingLocalCandidates.push(candidateInit);
+      // Ignore null candidates or end-of-candidate markers
+      if (!event.candidate || !event.candidate.candidate || event.candidate.candidate.trim() === '') {
         return;
       }
 
-      await this.uploadCandidate(candidateInit);
+      const candidateInit = event.candidate.toJSON();
+      const sanitized: RTCIceCandidateInit = {
+        candidate: candidateInit.candidate ?? '',
+        sdpMid: candidateInit.sdpMid ?? null,
+        sdpMLineIndex: candidateInit.sdpMLineIndex ?? null,
+      };
+
+      if (!this.connectionId) {
+        this.pendingLocalCandidates.push(sanitized);
+        return;
+      }
+
+      await this.uploadCandidate(sanitized);
     };
 
     this.pc.onconnectionstatechange = () => {
@@ -101,7 +118,7 @@ export class PeerConnectionManager {
     }
   }
 
-  private async flushPendingCandidates(): Promise<void> {
+  private async flushPendingLocalCandidates(): Promise<void> {
     if (!this.connectionId || this.pendingLocalCandidates.length === 0) return;
     const candidates = [...this.pendingLocalCandidates];
     this.pendingLocalCandidates = [];
@@ -110,8 +127,35 @@ export class PeerConnectionManager {
     }
   }
 
+  private async addRemoteCandidate(candidate: RTCIceCandidateInit): Promise<void> {
+    // If remote description is not yet set, queue the candidate!
+    if (!this.pc.remoteDescription) {
+      this.pendingRemoteCandidates.push(candidate);
+      return;
+    }
+
+    try {
+      await this.pc.addIceCandidate(new RTCIceCandidate(candidate));
+    } catch {
+      // Non-fatal
+    }
+  }
+
+  private async flushPendingRemoteCandidates(): Promise<void> {
+    if (!this.pc.remoteDescription || this.pendingRemoteCandidates.length === 0) return;
+    const queued = [...this.pendingRemoteCandidates];
+    this.pendingRemoteCandidates = [];
+    for (const cand of queued) {
+      try {
+        await this.pc.addIceCandidate(new RTCIceCandidate(cand));
+      } catch {
+        // Non-fatal
+      }
+    }
+  }
+
   /**
-   * Initiator: creates the data channel, generates an offer, and begins signaling.
+   * Initiator: creates data channel, generates offer, sets local description, and initiates signaling.
    */
   async startAsInitiator(
     filesMetadata?: Array<{ fileId: string; name: string; size: number; mimeType: string }>,
@@ -137,10 +181,10 @@ export class PeerConnectionManager {
       totalSize
     );
 
-    // Flush any ICE candidates gathered while waiting for connectionId
-    await this.flushPendingCandidates();
+    // Flush local candidates gathered while waiting for connectionId
+    await this.flushPendingLocalCandidates();
 
-    // Subscribe to remote candidates
+    // Subscribe to remote recipient candidates
     const unsubRecipient = subscribeToRecipientCandidates(
       this.roomId,
       this.connectionId,
@@ -148,10 +192,16 @@ export class PeerConnectionManager {
     );
     this.unsubscribers.push(unsubRecipient);
 
-    // Subscribe to answer
+    // Subscribe to recipient's answer
     const unsubAnswer = subscribeToAnswer(this.roomId, this.connectionId, async (answer) => {
       if (this.pc.signalingState === 'have-local-offer') {
-        await this.pc.setRemoteDescription(new RTCSessionDescription(answer));
+        try {
+          await this.pc.setRemoteDescription(new RTCSessionDescription(answer));
+          this.answerReceivedCallback?.();
+          await this.flushPendingRemoteCandidates();
+        } catch {
+          // Handled via connection state
+        }
       }
     });
     this.unsubscribers.push(unsubAnswer);
@@ -160,11 +210,22 @@ export class PeerConnectionManager {
   }
 
   /**
-   * Recipient: processes the offer, generates an answer, and begins signaling.
+   * Recipient: processes offer, generates answer, sets local description, and begins signaling.
    */
   async startAsRecipient(offer: RTCSessionDescriptionInit): Promise<void> {
+    // 1. Set remote description from offer
     await this.pc.setRemoteDescription(new RTCSessionDescription(offer));
 
+    // 2. Immediately subscribe to initiator candidates and flush any already received
+    const unsubInitiator = subscribeToInitiatorCandidates(
+      this.roomId,
+      this.connectionId,
+      (candidate) => this.addRemoteCandidate(candidate)
+    );
+    this.unsubscribers.push(unsubInitiator);
+    await this.flushPendingRemoteCandidates();
+
+    // 3. Create and set local answer
     const answer = await this.pc.createAnswer();
     await this.pc.setLocalDescription(answer);
 
@@ -175,24 +236,8 @@ export class PeerConnectionManager {
 
     await submitAnswer(this.roomId, this.connectionId, plainAnswer);
 
-    // Flush any ICE candidates gathered during answer creation
-    await this.flushPendingCandidates();
-
-    // Subscribe to initiator candidates
-    const unsubInitiator = subscribeToInitiatorCandidates(
-      this.roomId,
-      this.connectionId,
-      (candidate) => this.addRemoteCandidate(candidate)
-    );
-    this.unsubscribers.push(unsubInitiator);
-  }
-
-  private async addRemoteCandidate(candidate: RTCIceCandidateInit): Promise<void> {
-    try {
-      await this.pc.addIceCandidate(new RTCIceCandidate(candidate));
-    } catch {
-      // Non-fatal
-    }
+    // 4. Flush any local candidates gathered during answer generation
+    await this.flushPendingLocalCandidates();
   }
 
   getConnectionId(): string {

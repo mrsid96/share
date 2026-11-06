@@ -55,11 +55,13 @@ export default function RoomScreen() {
     acceptIncoming,
     declineIncoming,
     cancelTransfer,
+    cancelConnecting,
     outgoingProgress,
     incomingProgress,
     outgoingStatus,
     completedFiles,
     role,
+    connectionPhase,
     hasIncoming,
     incomingInitiatorUid,
     incomingFiles,
@@ -308,21 +310,34 @@ export default function RoomScreen() {
             title={role === 'sender' ? 'Sending Stream' : 'Receiving Stream'}
           >
             {isConnecting ? (
-              <div className="flex flex-col items-center justify-center py-10 gap-4 text-center">
+              <div className="flex flex-col items-center justify-center py-6 gap-5 text-center">
                 <div className="relative flex items-center justify-center">
                   <span className="absolute h-16 w-16 rounded-full bg-primary/20 animate-ping" />
                   <div className="relative flex h-14 w-14 items-center justify-center rounded-2xl bg-primary/10 text-primary">
                     <Loader2 className="h-7 w-7 animate-spin text-primary" />
                   </div>
                 </div>
-                <div className="flex flex-col gap-1">
+                <div className="flex flex-col gap-1.5 max-w-xs">
                   <p className="text-base font-bold font-heading text-foreground">
-                    Establishing Direct P2P Channel&hellip;
+                    {connectionPhase === 'waiting-for-accept'
+                      ? 'Waiting for Recipient to Accept…'
+                      : 'Establishing Direct P2P Channel…'}
                   </p>
-                  <p className="text-xs text-muted-foreground max-w-xs">
-                    Pairing browsers securely with end-to-end DTLS encryption.
+                  <p className="text-xs text-muted-foreground leading-relaxed">
+                    {connectionPhase === 'waiting-for-accept'
+                      ? `Prompt sent to ${recipientDevice?.deviceName || 'device'}. They need to tap "Accept & Receive" on their screen.`
+                      : 'Pairing browsers directly using encrypted WebRTC DataChannel.'}
                   </p>
                 </div>
+
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={cancelConnecting}
+                  className="mt-2 text-muted-foreground hover:text-foreground font-semibold"
+                >
+                  Cancel Request
+                </Button>
               </div>
             ) : (
               (outgoingProgress || incomingProgress) && (
