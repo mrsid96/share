@@ -339,32 +339,34 @@ export function subscribeToIncomingConnections(
 ): () => void {
   log.signaling(`Subscribing to incoming connections for user ${uid} in room ${roomId}`);
   const connectionsRef = collection(db, 'rooms', roomId, 'connections');
-  const q = query(connectionsRef, where('recipientUid', '==', uid), where('status', '==', 'pending'));
+  // Query strictly on recipientUid to avoid composite index requirements
+  const q = query(connectionsRef, where('recipientUid', '==', uid));
   return onSnapshot(
     q,
     (snap) => {
-      log.signaling(`Incoming connections snapshot: ${snap.docChanges().length} change(s)`);
       snap.docChanges().forEach((change) => {
-        if (change.type === 'added') {
+        if (change.type === 'added' || change.type === 'modified') {
           const data = change.doc.data();
-          log.signaling(`Incoming transfer detected: conn=${change.doc.id}, from=${data.initiatorUid}, files=${data.files?.length ?? 0}`);
-          callback({
-            connectionId: change.doc.id,
-            initiatorUid: data.initiatorUid,
-            recipientUid: data.recipientUid,
-            offer: data.offer,
-            answer: data.answer,
-            status: data.status,
-            files: data.files || [],
-            totalSize: data.totalSize || 0,
-            createdAt: (data.createdAt as Timestamp).toMillis(),
-            expiresAt: (data.expiresAt as Timestamp).toMillis(),
-          });
+          if (data.status === 'pending') {
+            log.signaling(`Incoming transfer detected: conn=${change.doc.id}, from=${data.initiatorUid}, files=${data.files?.length ?? 0}`);
+            callback({
+              connectionId: change.doc.id,
+              initiatorUid: data.initiatorUid,
+              recipientUid: data.recipientUid,
+              offer: data.offer,
+              answer: data.answer,
+              status: data.status,
+              files: data.files || [],
+              totalSize: data.totalSize || 0,
+              createdAt: (data.createdAt as Timestamp).toMillis(),
+              expiresAt: (data.expiresAt as Timestamp).toMillis(),
+            });
+          }
         }
       });
     },
     (err) => {
-      log.warn('Signaling', `subscribeToIncomingConnections notice: ${err.message}`);
+      log.error('Signaling', `subscribeToIncomingConnections error: ${err.message}`);
     }
   );
 }
