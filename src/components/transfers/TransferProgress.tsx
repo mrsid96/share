@@ -27,50 +27,50 @@ export function TransferProgress({ progress, onCancel, role }: TransferProgressP
     <div className="flex flex-col gap-6 py-2">
       {/* Header status */}
       <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2.5">
+        <div className="flex items-center gap-3">
           {isSender ? (
-            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-primary/10 text-primary">
+            <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-primary/10 text-primary">
               <ArrowUpCircle className="h-6 w-6 animate-pulse" />
             </div>
           ) : (
-            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-primary/10 text-primary">
+            <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-primary/10 text-primary">
               <ArrowDownCircle className="h-6 w-6 animate-pulse" />
             </div>
           )}
           <div className="flex flex-col">
-            <span className="text-base font-bold text-foreground">
-              {isSender ? 'Sending Files...' : 'Receiving Files...'}
+            <span className="text-base font-bold font-heading text-foreground">
+              {isSender ? 'Streaming Files...' : 'Receiving Stream...'}
             </span>
-            <span className="text-xs text-muted-foreground truncate max-w-xs">
-              {progress.currentFileName || 'Direct WebRTC Stream'}
+            <span className="text-xs text-muted-foreground truncate max-w-[200px] sm:max-w-xs font-medium">
+              {progress.currentFileName || 'Direct P2P DataChannel'}
             </span>
           </div>
         </div>
 
-        <span className="text-2xl font-black text-primary font-mono">
+        <span className="text-3xl font-black text-primary font-heading">
           {overallPercent}%
         </span>
       </div>
 
       {/* Overall Progress Bar */}
       <div className="flex flex-col gap-2">
-        <div className="flex items-center justify-between text-xs font-medium text-muted-foreground">
+        <div className="flex items-center justify-between text-xs font-semibold text-muted-foreground">
           <span>Overall Progress</span>
-          <span>
+          <span className="font-extrabold text-foreground">
             {formatBytes(progress.totalBytesTransferred)} / {formatBytes(progress.totalBytes)}
           </span>
         </div>
-        <Progress value={overallPercent} className="h-3 rounded-full" />
+        <Progress value={overallPercent} className="h-3.5 rounded-full" />
       </div>
 
       {/* Current File Sub-Progress */}
       {progress.currentFileSize > 0 && (
-        <div className="flex flex-col gap-1.5 p-3.5 rounded-xl bg-muted/40 border border-border/70 text-xs">
-          <div className="flex items-center justify-between font-medium">
-            <span className="truncate max-w-[200px] text-foreground font-semibold">
+        <div className="flex flex-col gap-2 p-3.5 rounded-2xl bg-muted/30 border border-border/80 text-xs">
+          <div className="flex items-center justify-between font-semibold">
+            <span className="truncate max-w-[220px] text-foreground">
               {progress.currentFileName}
             </span>
-            <span className="text-muted-foreground">{currentFilePercent}%</span>
+            <span className="text-muted-foreground font-mono">{currentFilePercent}%</span>
           </div>
           <Progress value={currentFilePercent} className="h-1.5" />
         </div>
@@ -78,24 +78,28 @@ export function TransferProgress({ progress, onCancel, role }: TransferProgressP
 
       {/* Metrics Grid */}
       <div className="grid grid-cols-2 gap-3 text-xs">
-        <div className="flex items-center gap-2.5 p-3 rounded-xl bg-surface border border-border/80">
-          <Gauge className="h-4 w-4 text-primary" />
+        <div className="flex items-center gap-2.5 p-3.5 rounded-2xl bg-surface border border-border/80 shadow-xs">
+          <div className="p-2 rounded-xl bg-primary/10 text-primary">
+            <Gauge className="h-4 w-4" />
+          </div>
           <div className="flex flex-col">
-            <span className="text-muted-foreground text-[10px] uppercase font-semibold">Speed</span>
-            <span className="font-bold text-foreground font-mono">
+            <span className="text-muted-foreground text-[10px] uppercase font-bold tracking-wider">Speed</span>
+            <span className="font-extrabold text-foreground font-mono text-sm">
               {formatSpeed(progress.speedBps || 0)}
             </span>
           </div>
         </div>
 
-        <div className="flex items-center gap-2.5 p-3 rounded-xl bg-surface border border-border/80">
-          <Clock className="h-4 w-4 text-primary" />
+        <div className="flex items-center gap-2.5 p-3.5 rounded-2xl bg-surface border border-border/80 shadow-xs">
+          <div className="p-2 rounded-xl bg-accent/15 text-accent">
+            <Clock className="h-4 w-4" />
+          </div>
           <div className="flex flex-col">
-            <span className="text-muted-foreground text-[10px] uppercase font-semibold">Remaining</span>
-            <span className="font-bold text-foreground font-mono">
+            <span className="text-muted-foreground text-[10px] uppercase font-bold tracking-wider">Remaining</span>
+            <span className="font-extrabold text-foreground font-mono text-sm">
               {progress.estimatedSecondsRemaining != null && progress.estimatedSecondsRemaining > 0
                 ? formatDuration(progress.estimatedSecondsRemaining)
-                : 'Calculating...'}
+                : 'Streaming...'}
             </span>
           </div>
         </div>
@@ -107,7 +111,7 @@ export function TransferProgress({ progress, onCancel, role }: TransferProgressP
         variant="ghost"
         size="md"
         onClick={onCancel}
-        className="w-full text-muted-foreground hover:text-error hover:bg-error/10"
+        className="text-error hover:bg-error/10 hover:text-error font-bold mt-1"
       >
         <X className="h-4 w-4 mr-1.5" />
         Cancel Transfer

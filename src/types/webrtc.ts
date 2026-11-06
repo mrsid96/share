@@ -4,7 +4,9 @@ export interface RTCSignalingConnection {
   recipientUid: string;
   offer?: RTCSessionDescriptionInit;
   answer?: RTCSessionDescriptionInit;
-  status: 'pending' | 'active' | 'closed';
+  status: 'pending' | 'active' | 'closed' | 'rejected';
+  files?: import('./transfer').FileMetadata[];
+  totalSize?: number;
   createdAt: number;
   expiresAt: number;
 }

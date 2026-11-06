@@ -4,18 +4,23 @@ import { cn } from './cn';
 
 const buttonVariants = cva(
   [
-    'inline-flex items-center justify-center gap-2 font-semibold transition-all duration-150',
+    'inline-flex items-center justify-center gap-2 font-bold transition-all duration-150',
     'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2',
     'disabled:pointer-events-none disabled:opacity-50 select-none cursor-pointer',
-    'rounded-xl text-sm active:scale-[0.98]',
+    'rounded-2xl text-sm active:scale-[0.96] touch-manipulation',
   ],
   {
     variants: {
       variant: {
         default: [
-          'bg-primary text-white shadow-md shadow-primary/25',
-          'hover:bg-primary/90 hover:shadow-lg hover:shadow-primary/30',
+          'bg-primary text-white shadow-md shadow-primary/30',
+          'hover:bg-primary/95 hover:shadow-lg hover:shadow-primary/35',
           'border border-primary/20',
+        ],
+        accent: [
+          'bg-accent text-white shadow-md shadow-accent/30',
+          'hover:bg-accent/90 hover:shadow-lg hover:shadow-accent/40',
+          'border border-accent/20',
         ],
         secondary: [
           'bg-secondary text-secondary-foreground',
@@ -27,8 +32,8 @@ const buttonVariants = cva(
           'hover:bg-muted active:bg-muted/80',
         ],
         outline: [
-          'border border-border bg-surface text-foreground shadow-xs',
-          'hover:bg-muted hover:border-border/80',
+          'border border-border/90 bg-surface text-foreground shadow-xs',
+          'hover:bg-muted/70 hover:border-border',
         ],
         destructive: [
           'bg-error text-white shadow-md shadow-error/20',
@@ -36,9 +41,9 @@ const buttonVariants = cva(
         ],
       },
       size: {
-        sm: 'h-9 px-3 text-xs',
-        md: 'h-11 px-5 text-sm',
-        lg: 'h-13 px-6 text-base font-bold',
+        sm: 'h-10 px-3.5 text-xs rounded-xl min-w-[44px]',
+        md: 'h-12 px-5 text-sm rounded-2xl min-w-[48px]',
+        lg: 'h-14 px-7 text-base font-extrabold rounded-2xl min-w-[52px]',
       },
     },
     defaultVariants: {

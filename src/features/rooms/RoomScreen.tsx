@@ -11,6 +11,9 @@ import {
   Loader2,
   Users,
   Smartphone,
+  Share2,
+  Sparkles,
+  ArrowRight,
 } from 'lucide-react';
 import { AppShell } from '../../components/layout/AppShell';
 import { Button } from '../../components/ui/Button';
@@ -73,10 +76,12 @@ export default function RoomScreen() {
     }
   }, [isAuthenticated, roomId, room, joinRoom]);
 
-  // Handle selected recipient leaving
+  // Frictionless UX: Auto-select single peer if available and none currently selected
   React.useEffect(() => {
-    if (selectedRecipientUid && !peers.some((p) => p.uid === selectedRecipientUid)) {
-      setSelectedRecipientUid(null);
+    if (peers.length === 1 && !selectedRecipientUid) {
+      setSelectedRecipientUid(peers[0].uid);
+    } else if (selectedRecipientUid && !peers.some((p) => p.uid === selectedRecipientUid)) {
+      setSelectedRecipientUid(peers.length > 0 ? peers[0].uid : null);
     }
   }, [peers, selectedRecipientUid]);
 
@@ -93,6 +98,22 @@ export default function RoomScreen() {
     } catch {
       // Fallback
     }
+  };
+
+  const handleShare = async () => {
+    if (navigator.share) {
+      try {
+        await navigator.share({
+          title: 'Join my ShareWave room',
+          text: `Beam files directly to me on ShareWave: Room ${roomId}`,
+          url: inviteUrl,
+        });
+        return;
+      } catch {
+        // User cancelled or share failed, fallback to modal
+      }
+    }
+    setShowQrModal(true);
   };
 
   const handleLeave = async () => {
@@ -133,8 +154,15 @@ export default function RoomScreen() {
     return (
       <AppShell>
         <div className="flex flex-col items-center justify-center min-h-[60vh] gap-4">
-          <Loader2 className="h-9 w-9 animate-spin text-primary" />
-          <p className="text-sm font-semibold text-foreground">Joining room&hellip;</p>
+          <div className="relative flex items-center justify-center">
+            <span className="absolute h-16 w-16 rounded-full bg-primary/20 animate-ping" />
+            <div className="relative flex h-14 w-14 items-center justify-center rounded-2xl bg-primary/10 text-primary">
+              <Loader2 className="h-7 w-7 animate-spin text-primary" />
+            </div>
+          </div>
+          <p className="text-base font-bold font-heading text-foreground">
+            Entering room&hellip;
+          </p>
         </div>
       </AppShell>
     );
@@ -144,11 +172,11 @@ export default function RoomScreen() {
     return (
       <AppShell>
         <div className="flex flex-col items-center justify-center min-h-[60vh] gap-5 text-center px-4 max-w-md mx-auto">
-          <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-error/10 text-error">
+          <div className="flex h-16 w-16 items-center justify-center rounded-3xl bg-error/10 text-error shadow-sm">
             <AlertCircle className="h-8 w-8" />
           </div>
           <div className="flex flex-col gap-1.5">
-            <h2 className="text-xl font-bold text-foreground">Room Error</h2>
+            <h2 className="text-xl font-bold font-heading text-foreground">Room Error</h2>
             <p className="text-xs text-muted-foreground leading-relaxed">{roomError}</p>
           </div>
           <Button variant="default" size="md" onClick={() => navigate('/')}>
@@ -161,44 +189,40 @@ export default function RoomScreen() {
 
   return (
     <AppShell>
-      <div className="flex flex-col gap-6 max-w-5xl mx-auto">
-        {/* Top Control Bar */}
-        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 p-4 rounded-2xl bg-surface border border-border/80 shadow-xs">
-          <div className="flex items-center gap-3">
-            <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-primary/10 text-primary border border-primary/20 text-xs font-bold">
+      <div className="flex flex-col gap-5 sm:gap-6 max-w-5xl mx-auto pb-24 sm:pb-8">
+        {/* Top Floating Control Bar */}
+        <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 p-3.5 sm:p-4 rounded-3xl bg-surface border border-border/80 shadow-xs">
+          <div className="flex items-center justify-between sm:justify-start gap-3">
+            <div className="flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-primary/10 text-primary border border-primary/20 text-xs font-bold">
               <Users className="h-3.5 w-3.5" />
               <span>{peers.length + 1} Device{peers.length !== 0 ? 's' : ''} in Room</span>
             </div>
-            <span className="text-xs text-muted-foreground hidden md:inline">
-              Room ID: <span className="font-mono text-foreground font-semibold">{roomId}</span>
-            </span>
+            <button
+              onClick={handleCopyLink}
+              title="Click to copy room code"
+              className="flex items-center gap-1.5 text-xs font-bold text-muted-foreground hover:text-foreground bg-muted/30 px-3 py-1.5 rounded-full transition-colors cursor-pointer"
+            >
+              <span>Room: <span className="font-mono text-primary uppercase">{roomId}</span></span>
+              {copiedLink ? <Check className="h-3 w-3 text-emerald-500" /> : <Copy className="h-3 w-3" />}
+            </button>
           </div>
 
-          <div className="flex items-center gap-2 w-full sm:w-auto">
+          <div className="flex items-center gap-2">
             <Button
               variant="outline"
               size="sm"
-              onClick={handleCopyLink}
-              className="flex-1 sm:flex-initial"
+              onClick={handleShare}
+              className="flex-1 sm:flex-initial font-bold"
             >
-              {copiedLink ? (
-                <>
-                  <Check className="mr-1.5 h-4 w-4 text-emerald-500" />
-                  Link Copied!
-                </>
-              ) : (
-                <>
-                  <Copy className="mr-1.5 h-4 w-4" />
-                  Copy Link
-                </>
-              )}
+              <Share2 className="mr-1.5 h-4 w-4" />
+              Invite
             </Button>
 
             <Button
               variant="outline"
               size="sm"
               onClick={() => setShowQrModal(true)}
-              className="flex-1 sm:flex-initial"
+              className="flex-1 sm:flex-initial font-bold"
               aria-label="Show QR Code"
             >
               <QrCode className="mr-1.5 h-4 w-4" />
@@ -209,7 +233,7 @@ export default function RoomScreen() {
               variant="ghost"
               size="sm"
               onClick={handleLeave}
-              className="text-muted-foreground hover:text-error hover:bg-error/10"
+              className="text-muted-foreground hover:text-error hover:bg-error/10 font-bold"
               aria-label="Leave room"
               title="Leave Room"
             >
@@ -218,14 +242,14 @@ export default function RoomScreen() {
           </div>
         </div>
 
-        {/* QR Code Modal */}
+        {/* QR Code Quick Modal */}
         <Modal
           open={showQrModal}
           onClose={() => setShowQrModal(false)}
-          title="Scan QR to Join Room"
+          title="Scan to Join Instantly"
         >
-          <div className="flex flex-col items-center gap-6 py-4">
-            <div className="p-5 bg-white rounded-3xl shadow-md border border-border/60">
+          <div className="flex flex-col items-center gap-5 py-2">
+            <div className="p-5 bg-white rounded-3xl shadow-lg border border-border/60">
               <QRCodeSVG
                 value={inviteUrl}
                 size={220}
@@ -234,20 +258,33 @@ export default function RoomScreen() {
               />
             </div>
             <div className="flex flex-col items-center text-center gap-1 max-w-xs">
-              <p className="text-sm font-bold text-foreground">
+              <span className="text-xs font-extrabold uppercase tracking-wider text-accent flex items-center gap-1">
+                <Sparkles className="h-3 w-3" /> Quick Camera Scan
+              </span>
+              <p className="text-base font-bold font-heading text-foreground">
                 Point any phone camera to join
               </p>
               <p className="text-xs text-muted-foreground">
-                No app installation required. Works on iOS Safari, Android Chrome, and all desktop browsers.
+                Works instantly in Safari, Chrome, and Firefox without installing any apps.
               </p>
             </div>
             <Button
-              variant="outline"
+              variant="default"
               size="md"
-              className="w-full"
+              className="w-full font-bold shadow-md shadow-primary/20"
               onClick={handleCopyLink}
             >
-              {copiedLink ? 'Copied to clipboard!' : 'Copy invite link'}
+              {copiedLink ? (
+                <>
+                  <Check className="mr-1.5 h-4 w-4 text-emerald-300" />
+                  Copied link to clipboard!
+                </>
+              ) : (
+                <>
+                  <Copy className="mr-1.5 h-4 w-4" />
+                  Copy Invite Link
+                </>
+              )}
             </Button>
           </div>
         </Modal>
@@ -267,17 +304,23 @@ export default function RoomScreen() {
           <Modal
             open={true}
             onClose={() => {}}
-            title={role === 'sender' ? 'Sending Transfer' : 'Receiving Transfer'}
+            hideCloseButton={true}
+            title={role === 'sender' ? 'Sending Stream' : 'Receiving Stream'}
           >
             {isConnecting ? (
               <div className="flex flex-col items-center justify-center py-10 gap-4 text-center">
-                <Loader2 className="h-10 w-10 animate-spin text-primary" />
+                <div className="relative flex items-center justify-center">
+                  <span className="absolute h-16 w-16 rounded-full bg-primary/20 animate-ping" />
+                  <div className="relative flex h-14 w-14 items-center justify-center rounded-2xl bg-primary/10 text-primary">
+                    <Loader2 className="h-7 w-7 animate-spin text-primary" />
+                  </div>
+                </div>
                 <div className="flex flex-col gap-1">
-                  <p className="text-base font-bold text-foreground">
-                    Securing WebRTC DataChannel&hellip;
+                  <p className="text-base font-bold font-heading text-foreground">
+                    Establishing Direct P2P Channel&hellip;
                   </p>
-                  <p className="text-xs text-muted-foreground">
-                    Establishing direct peer-to-peer connection with DTLS encryption.
+                  <p className="text-xs text-muted-foreground max-w-xs">
+                    Pairing browsers securely with end-to-end DTLS encryption.
                   </p>
                 </div>
               </div>
@@ -309,7 +352,7 @@ export default function RoomScreen() {
         {transferError && !isCompleted && (
           <div
             data-testid="transfer-error"
-            className="flex items-center gap-3 p-4 rounded-2xl border border-error/30 bg-error/10 text-error text-sm font-semibold"
+            className="flex items-center gap-3 p-4 rounded-3xl border border-error/30 bg-error/10 text-error text-sm font-semibold"
           >
             <AlertCircle className="h-5 w-5 shrink-0" />
             <p className="flex-1">{transferError}</p>
@@ -317,29 +360,36 @@ export default function RoomScreen() {
               variant="ghost"
               size="sm"
               onClick={resetTransfer}
-              className="text-error hover:bg-error/20"
+              className="text-error hover:bg-error/20 font-bold"
             >
               Dismiss
             </Button>
           </div>
         )}
 
-        {/* Main Grid: Devices & File Staging */}
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
-          {/* Left: Device Discovery Radar (7 cols) */}
+        {/* Main Grid: Devices Radar (Left) & File Staging (Right) */}
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 sm:gap-6 items-start">
+          {/* Left: Device Discovery Radar (7 cols on desktop) */}
           <div className="lg:col-span-7 flex flex-col gap-3.5">
             <div className="flex items-center justify-between px-1">
-              <h2 className="text-base font-bold text-foreground">
-                Nearby Devices
-              </h2>
+              <div className="flex items-center gap-2">
+                <h2 className="text-base font-bold font-heading text-foreground">
+                  Nearby Devices
+                </h2>
+                {peers.length > 0 && (
+                  <span className="text-[11px] font-extrabold px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-600 dark:text-emerald-400">
+                    {peers.length} active
+                  </span>
+                )}
+              </div>
               {peers.length > 0 && (
-                <span className="text-xs text-primary font-semibold">
+                <span className="text-xs text-primary font-bold">
                   Tap device to select
                 </span>
               )}
             </div>
 
-            <Card className="p-5 border border-border/80">
+            <Card className="p-5 border border-border/80 bg-surface">
               <DeviceList
                 devices={[
                   ...(currentDevice ? [currentDevice] : []),
@@ -347,83 +397,96 @@ export default function RoomScreen() {
                 ]}
                 currentDeviceUid={currentDevice?.uid}
                 selectedUid={selectedRecipientUid}
-                onSelect={(uid) =>
-                  setSelectedRecipientUid(uid === selectedRecipientUid ? null : uid)
-                }
+                hasStagedFiles={selectedFiles.length > 0}
+                onSelect={(uid) => {
+                  setSelectedRecipientUid(uid === selectedRecipientUid ? null : uid);
+                }}
+                onShowQr={() => setShowQrModal(true)}
+                onCopyLink={handleCopyLink}
+                copiedLink={copiedLink}
               />
             </Card>
           </div>
 
-          {/* Right: File Staging & Transfer (5 cols) */}
+          {/* Right: File Staging & Transfer (5 cols on desktop) */}
           <div className="lg:col-span-5 flex flex-col gap-3.5">
             <div className="flex items-center justify-between px-1">
-              <h2 className="text-base font-bold text-foreground">
-                Send Files
+              <h2 className="text-base font-bold font-heading text-foreground">
+                Drop & Send
               </h2>
               {recipientDevice && (
-                <div className="flex items-center gap-1.5 text-xs font-semibold text-primary">
+                <div className="flex items-center gap-1.5 text-xs font-bold text-primary bg-primary/10 px-2.5 py-0.5 rounded-full">
                   <Smartphone className="h-3.5 w-3.5" />
-                  <span>To: {recipientDevice.deviceName}</span>
+                  <span className="truncate max-w-[140px]">To: {recipientDevice.deviceName}</span>
                 </div>
               )}
             </div>
 
-            <Card className="p-5 flex flex-col gap-4 border border-border/80">
-              {peers.length === 0 ? (
-                <div className="text-center py-10 px-4 text-muted-foreground text-xs flex flex-col items-center gap-2">
-                  <p className="font-semibold text-foreground text-sm">
-                    No recipients connected yet
-                  </p>
-                  <p className="max-w-xs leading-relaxed">
-                    Share this room link or QR code with another phone or laptop to send files.
-                  </p>
-                </div>
-              ) : !selectedRecipientUid ? (
-                <div className="text-center py-10 px-4 text-muted-foreground text-xs flex flex-col items-center gap-2">
-                  <p className="font-semibold text-foreground text-sm">
-                    Select a recipient
-                  </p>
-                  <p className="max-w-xs leading-relaxed">
-                    Tap any device card in the Nearby Devices list to start staging files.
-                  </p>
-                </div>
-              ) : (
-                <>
-                  <FileDropZone
-                    selectedFiles={selectedFiles}
-                    onFilesSelected={handleAddFiles}
-                    onRemoveFile={handleRemoveFile}
-                  />
+            <Card className="p-5 flex flex-col gap-4 border border-border/80 bg-surface">
+              <FileDropZone
+                selectedFiles={selectedFiles}
+                onFilesSelected={handleAddFiles}
+                onRemoveFile={handleRemoveFile}
+              />
 
-                  <Button
-                    variant="default"
-                    size="lg"
-                    className="w-full font-bold shadow-lg shadow-primary/25 py-6 mt-2 text-base"
-                    disabled={
-                      selectedFiles.length === 0 ||
-                      isConnecting ||
-                      outgoingStatus === 'transferring'
-                    }
-                    onClick={handleSendFiles}
-                  >
-                    {isConnecting ? (
-                      <>
-                        <Loader2 className="mr-2 h-5 w-5 animate-spin" />
-                        Connecting...
-                      </>
-                    ) : (
-                      <>
-                        <Send className="mr-2 h-5 w-5" />
-                        Send {selectedFiles.length > 0 ? `${selectedFiles.length} File${selectedFiles.length !== 1 ? 's' : ''}` : 'Files'}
-                        {totalSelectedSize > 0 && ` (${formatBytes(totalSelectedSize)})`}
-                      </>
-                    )}
-                  </Button>
-                </>
-              )}
+              {/* In-Card Primary Send Button */}
+              <Button
+                variant="default"
+                size="lg"
+                className="w-full font-extrabold shadow-lg shadow-primary/25 py-6 mt-1 text-base transition-transform active:scale-95"
+                disabled={
+                  selectedFiles.length === 0 ||
+                  !selectedRecipientUid ||
+                  isConnecting ||
+                  outgoingStatus === 'transferring'
+                }
+                onClick={handleSendFiles}
+                aria-label="Send Files"
+              >
+                {isConnecting ? (
+                  <>
+                    <Loader2 className="mr-2 h-5 w-5 animate-spin" />
+                    Connecting...
+                  </>
+                ) : (
+                  <>
+                    <Send className="mr-2 h-5 w-5" />
+                    Send {selectedFiles.length > 0 ? `${selectedFiles.length} File${selectedFiles.length !== 1 ? 's' : ''}` : 'Files'}
+                    {totalSelectedSize > 0 && ` (${formatBytes(totalSelectedSize)})`}
+                  </>
+                )}
+              </Button>
             </Card>
           </div>
         </div>
+
+        {/* Mobile-First Floating Sticky Bottom Action Pill */}
+        {/* Displays when files are staged and recipient is chosen on mobile screens */}
+        {selectedFiles.length > 0 && selectedRecipientUid && (
+          <div className="fixed bottom-0 inset-x-0 p-4 pb-safe bg-surface/90 backdrop-blur-xl border-t border-border/80 z-30 lg:hidden shadow-2xl animate-in slide-in-from-bottom duration-200">
+            <Button
+              variant="default"
+              size="lg"
+              className="w-full h-14 font-extrabold text-base shadow-xl shadow-primary/30 active:scale-95"
+              disabled={isConnecting || outgoingStatus === 'transferring'}
+              onClick={handleSendFiles}
+              aria-label="Send Files"
+            >
+              {isConnecting ? (
+                <>
+                  <Loader2 className="mr-2 h-5 w-5 animate-spin" />
+                  Sending...
+                </>
+              ) : (
+                <>
+                  <Send className="mr-2 h-5 w-5" />
+                  Send {selectedFiles.length} file{selectedFiles.length !== 1 ? 's' : ''} to {recipientDevice?.deviceName || 'Device'}
+                  <ArrowRight className="ml-1.5 h-4 w-4" />
+                </>
+              )}
+            </Button>
+          </div>
+        )}
       </div>
     </AppShell>
   );

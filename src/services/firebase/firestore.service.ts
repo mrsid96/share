@@ -144,16 +144,24 @@ export async function createSignalingConnection(
   roomId: string,
   initiatorUid: string,
   recipientUid: string,
-  offer: RTCSessionDescriptionInit
+  offer: RTCSessionDescriptionInit,
+  files?: Array<{ fileId: string; name: string; size: number; mimeType: string }>,
+  totalSize?: number
 ): Promise<string> {
   const connectionId = generateConnectionId();
   const now = Date.now();
+  const plainOffer = {
+    type: offer.type,
+    sdp: offer.sdp,
+  };
   await setDoc(doc(db, 'rooms', roomId, 'connections', connectionId), {
     initiatorUid,
     recipientUid,
-    offer,
+    offer: plainOffer,
     answer: null,
     status: 'pending',
+    files: files ?? [],
+    totalSize: totalSize ?? 0,
     createdAt: Timestamp.fromMillis(now),
     expiresAt: Timestamp.fromMillis(now + 10 * 60 * 1000), // 10 min signaling TTL
   });
@@ -165,10 +173,27 @@ export async function submitAnswer(
   connectionId: string,
   answer: RTCSessionDescriptionInit
 ): Promise<void> {
+  const plainAnswer = {
+    type: answer.type,
+    sdp: answer.sdp,
+  };
   await updateDoc(doc(db, 'rooms', roomId, 'connections', connectionId), {
-    answer,
+    answer: plainAnswer,
     status: 'active',
   });
+}
+
+export async function rejectConnection(
+  roomId: string,
+  connectionId: string
+): Promise<void> {
+  try {
+    await updateDoc(doc(db, 'rooms', roomId, 'connections', connectionId), {
+      status: 'rejected',
+    });
+  } catch {
+    // Non-fatal
+  }
 }
 
 export async function addInitiatorCandidate(
@@ -273,6 +298,8 @@ export function subscribeToConnection(
         offer: data.offer,
         answer: data.answer,
         status: data.status,
+        files: data.files || [],
+        totalSize: data.totalSize || 0,
         createdAt: (data.createdAt as Timestamp).toMillis(),
         expiresAt: (data.expiresAt as Timestamp).toMillis(),
       });
@@ -303,6 +330,8 @@ export function subscribeToIncomingConnections(
             offer: data.offer,
             answer: data.answer,
             status: data.status,
+            files: data.files || [],
+            totalSize: data.totalSize || 0,
             createdAt: (data.createdAt as Timestamp).toMillis(),
             expiresAt: (data.expiresAt as Timestamp).toMillis(),
           });

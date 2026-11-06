@@ -11,8 +11,11 @@ import {
 
 export type ConnectionRole = 'initiator' | 'recipient';
 
+// Multi-provider STUN pool for high reliability & ad-block resilience
 const RTC_CONFIG: RTCConfiguration = {
   iceServers: [
+    { urls: 'stun:stun.cloudflare.com:3478' },
+    { urls: 'stun:stun.services.mozilla.com' },
     { urls: 'stun:stun.l.google.com:19302' },
     { urls: 'stun:stun1.l.google.com:19302' },
   ],
@@ -42,6 +45,9 @@ export class PeerConnectionManager {
   private connectionStateCallback?: (state: RTCPeerConnectionState) => void;
   private iceStateCallback?: (state: RTCIceConnectionState) => void;
 
+  // Buffer candidates generated before connectionId is resolved
+  private pendingLocalCandidates: RTCIceCandidateInit[] = [];
+
   constructor(options: PeerConnectionOptions) {
     this.roomId = options.roomId;
     this.connectionId = options.connectionId ?? '';
@@ -60,15 +66,14 @@ export class PeerConnectionManager {
     this.pc.onicecandidate = async (event) => {
       if (!event.candidate) return;
       const candidateInit = event.candidate.toJSON();
-      try {
-        if (this.role === 'initiator') {
-          await addInitiatorCandidate(this.roomId, this.connectionId, candidateInit);
-        } else {
-          await addRecipientCandidate(this.roomId, this.connectionId, candidateInit);
-        }
-      } catch {
-        // ICE candidate upload failure is non-fatal; connection may still work
+
+      if (!this.connectionId) {
+        // Buffer until connectionId is assigned by Firestore
+        this.pendingLocalCandidates.push(candidateInit);
+        return;
       }
+
+      await this.uploadCandidate(candidateInit);
     };
 
     this.pc.onconnectionstatechange = () => {
@@ -84,22 +89,56 @@ export class PeerConnectionManager {
     };
   }
 
+  private async uploadCandidate(candidateInit: RTCIceCandidateInit): Promise<void> {
+    try {
+      if (this.role === 'initiator') {
+        await addInitiatorCandidate(this.roomId, this.connectionId, candidateInit);
+      } else {
+        await addRecipientCandidate(this.roomId, this.connectionId, candidateInit);
+      }
+    } catch {
+      // ICE candidate upload failure is non-fatal
+    }
+  }
+
+  private async flushPendingCandidates(): Promise<void> {
+    if (!this.connectionId || this.pendingLocalCandidates.length === 0) return;
+    const candidates = [...this.pendingLocalCandidates];
+    this.pendingLocalCandidates = [];
+    for (const cand of candidates) {
+      await this.uploadCandidate(cand);
+    }
+  }
+
   /**
    * Initiator: creates the data channel, generates an offer, and begins signaling.
    */
-  async startAsInitiator(): Promise<{ channel: RTCDataChannel; connectionId: string }> {
+  async startAsInitiator(
+    filesMetadata?: Array<{ fileId: string; name: string; size: number; mimeType: string }>,
+    totalSize?: number
+  ): Promise<{ channel: RTCDataChannel; connectionId: string }> {
     const channel = this.pc.createDataChannel('file-transfer', { ordered: true });
     channel.binaryType = 'arraybuffer';
 
     const offer = await this.pc.createOffer();
     await this.pc.setLocalDescription(offer);
 
+    const plainOffer: RTCSessionDescriptionInit = {
+      type: offer.type,
+      sdp: offer.sdp,
+    };
+
     this.connectionId = await createSignalingConnection(
       this.roomId,
       this.localUid,
       this.remoteUid,
-      offer
+      plainOffer,
+      filesMetadata,
+      totalSize
     );
+
+    // Flush any ICE candidates gathered while waiting for connectionId
+    await this.flushPendingCandidates();
 
     // Subscribe to remote candidates
     const unsubRecipient = subscribeToRecipientCandidates(
@@ -129,7 +168,15 @@ export class PeerConnectionManager {
     const answer = await this.pc.createAnswer();
     await this.pc.setLocalDescription(answer);
 
-    await submitAnswer(this.roomId, this.connectionId, answer);
+    const plainAnswer: RTCSessionDescriptionInit = {
+      type: answer.type,
+      sdp: answer.sdp,
+    };
+
+    await submitAnswer(this.roomId, this.connectionId, plainAnswer);
+
+    // Flush any ICE candidates gathered during answer creation
+    await this.flushPendingCandidates();
 
     // Subscribe to initiator candidates
     const unsubInitiator = subscribeToInitiatorCandidates(
@@ -160,6 +207,8 @@ export class PeerConnectionManager {
     this.unsubscribers.forEach((unsub) => unsub());
     this.unsubscribers = [];
     this.pc.close();
-    cleanupConnection(this.roomId, this.connectionId).catch(() => {});
+    if (this.connectionId) {
+      cleanupConnection(this.roomId, this.connectionId).catch(() => {});
+    }
   }
 }

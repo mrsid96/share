@@ -1,7 +1,6 @@
 import * as React from 'react';
 import {
   Upload,
-  FolderOpen,
   X,
   FileText,
   FileImage,
@@ -10,6 +9,7 @@ import {
   FileArchive,
   FileCode,
   File as GenericFileIcon,
+  Plus,
 } from 'lucide-react';
 import { cn } from '../ui/cn';
 import { Button } from '../ui/Button';
@@ -23,22 +23,22 @@ export interface FileDropZoneProps {
 
 function getFileIcon(mime: string, name: string) {
   const ext = name.split('.').pop()?.toLowerCase() || '';
-  if (mime.startsWith('image/') || ['jpg', 'jpeg', 'png', 'gif', 'svg', 'webp'].includes(ext)) {
+  if (mime.startsWith('image/') || ['jpg', 'jpeg', 'png', 'gif', 'svg', 'webp', 'heic'].includes(ext)) {
     return FileImage;
   }
-  if (mime.startsWith('video/') || ['mp4', 'mov', 'webm', 'mkv'].includes(ext)) {
+  if (mime.startsWith('video/') || ['mp4', 'mov', 'webm', 'mkv', 'avi'].includes(ext)) {
     return FileVideo;
   }
-  if (mime.startsWith('audio/') || ['mp3', 'wav', 'ogg', 'm4a'].includes(ext)) {
+  if (mime.startsWith('audio/') || ['mp3', 'wav', 'ogg', 'm4a', 'flac'].includes(ext)) {
     return FileAudio;
   }
-  if (['zip', 'tar', 'gz', 'rar', '7z'].includes(ext)) {
+  if (['zip', 'tar', 'gz', 'rar', '7z', 'dmg', 'pkg'].includes(ext)) {
     return FileArchive;
   }
-  if (['js', 'ts', 'jsx', 'tsx', 'html', 'css', 'json', 'py', 'rs', 'go'].includes(ext)) {
+  if (['js', 'ts', 'jsx', 'tsx', 'html', 'css', 'json', 'py', 'rs', 'go', 'sql'].includes(ext)) {
     return FileCode;
   }
-  if (mime.includes('pdf') || mime.includes('document') || mime.includes('text') || ['txt', 'md', 'pdf'].includes(ext)) {
+  if (mime.includes('pdf') || mime.includes('document') || mime.includes('text') || ['txt', 'md', 'pdf', 'doc', 'docx'].includes(ext)) {
     return FileText;
   }
   return GenericFileIcon;
@@ -106,55 +106,64 @@ export function FileDropZone({
 
       {/* Drag & Drop Area */}
       <div
+        role="button"
+        tabIndex={0}
         onClick={() => inputRef.current?.click()}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            inputRef.current?.click();
+          }
+        }}
         onDragEnter={handleDragEnter}
         onDragLeave={handleDragLeave}
         onDragOver={handleDragOver}
         onDrop={handleDrop}
         className={cn(
-          'group relative flex flex-col items-center justify-center p-6 sm:p-8 rounded-2xl border-2 border-dashed transition-all duration-200 cursor-pointer text-center select-none',
+          'group relative flex flex-col items-center justify-center p-6 sm:p-7 rounded-3xl border-2 border-dashed transition-all duration-200 cursor-pointer text-center select-none',
+          'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary',
           isDragging
             ? 'border-primary bg-primary/10 scale-[1.01]'
-            : 'border-border/80 bg-muted/20 hover:bg-muted/40 hover:border-primary/50'
+            : 'border-border/90 bg-muted/20 hover:bg-muted/40 hover:border-primary/50'
         )}
       >
-        <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-primary/10 text-primary mb-3 transition-transform group-hover:scale-110">
+        <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-primary/10 text-primary mb-2.5 transition-transform group-hover:scale-110 shadow-xs">
           <Upload className="h-6 w-6" />
         </div>
 
-        <p className="text-sm font-semibold text-foreground">
-          Drop files here, or <span className="text-primary hover:underline">browse</span>
+        <p className="text-sm font-bold font-heading text-foreground">
+          Tap to choose files, or <span className="text-primary underline underline-offset-2">browse</span>
         </p>
-        <p className="text-xs text-muted-foreground mt-1">
-          Supports any file format &bull; Unlimited sizes via chunked WebRTC
+        <p className="text-xs text-muted-foreground mt-1 font-medium">
+          Photos, videos, documents &bull; Unlimited file size via WebRTC
         </p>
       </div>
 
       {/* Selected file queue */}
       {selectedFiles.length > 0 && (
-        <div className="flex flex-col gap-2 mt-2">
-          <div className="flex items-center justify-between px-1 text-xs text-muted-foreground font-medium">
+        <div className="flex flex-col gap-2 mt-1">
+          <div className="flex items-center justify-between px-1 text-xs text-muted-foreground font-semibold">
             <span>
               {selectedFiles.length} file{selectedFiles.length !== 1 ? 's' : ''} staged
             </span>
-            <span className="font-semibold text-foreground">{formatBytes(totalSize)}</span>
+            <span className="font-extrabold text-foreground">{formatBytes(totalSize)}</span>
           </div>
 
-          <div className="flex flex-col gap-1.5 max-h-56 overflow-y-auto pr-1">
+          <div className="flex flex-col gap-1.5 max-h-52 overflow-y-auto pr-1">
             {selectedFiles.map((file, idx) => {
               const FileTypeIcon = getFileIcon(file.type, file.name);
               return (
                 <div
                   key={`${file.name}-${file.size}-${idx}`}
-                  className="flex items-center justify-between p-2.5 rounded-xl border border-border/70 bg-surface text-xs"
+                  className="flex items-center justify-between p-2.5 rounded-2xl border border-border/80 bg-surface text-xs shadow-xs"
                 >
                   <div className="flex items-center gap-2.5 min-w-0 flex-1 mr-2">
-                    <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-muted text-muted-foreground shrink-0">
-                      <FileTypeIcon className="h-4 w-4 text-primary" />
+                    <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-primary/10 text-primary shrink-0">
+                      <FileTypeIcon className="h-4.5 w-4.5" />
                     </div>
                     <div className="flex flex-col min-w-0">
-                      <span className="font-semibold text-foreground truncate">{file.name}</span>
-                      <span className="text-[11px] text-muted-foreground">
+                      <span className="font-bold text-foreground truncate">{file.name}</span>
+                      <span className="text-[11px] text-muted-foreground font-medium">
                         {formatBytes(file.size)}
                       </span>
                     </div>
@@ -166,7 +175,7 @@ export function FileDropZone({
                       e.stopPropagation();
                       onRemoveFile(idx);
                     }}
-                    className="p-1 rounded-lg text-muted-foreground hover:text-error hover:bg-error/10 transition-colors"
+                    className="min-h-[44px] min-w-[44px] flex items-center justify-center rounded-xl text-muted-foreground hover:text-error hover:bg-error/10 transition-colors cursor-pointer"
                     aria-label={`Remove ${file.name}`}
                   >
                     <X className="h-4 w-4" />
@@ -181,9 +190,9 @@ export function FileDropZone({
             variant="outline"
             size="sm"
             onClick={() => inputRef.current?.click()}
-            className="w-full mt-1 border-dashed text-xs text-muted-foreground hover:text-foreground"
+            className="w-full mt-1 border-dashed text-xs text-muted-foreground hover:text-foreground font-bold"
           >
-            <FolderOpen className="h-3.5 w-3.5 mr-1.5" />
+            <Plus className="h-3.5 w-3.5 mr-1" />
             Add more files
           </Button>
         </div>

@@ -2,7 +2,12 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useAuthStore } from '../store/auth.store';
 import { PeerConnectionManager } from '../services/webrtc/peer-connection';
 import { FileTransferManager } from '../services/webrtc/file-transfer';
-import { subscribeToIncomingConnections } from '../services/firebase/firestore.service';
+import {
+  subscribeToIncomingConnections,
+  subscribeToConnection,
+  rejectConnection,
+} from '../services/firebase/firestore.service';
+import { generateFileId } from '../utils/random-id';
 import type { TransferProgress, ReceivedFile } from '../types/transfer';
 import type { TransferStatus } from '../types/transfer';
 
@@ -87,12 +92,15 @@ export function useTransfer(roomId: string): UseTransferReturn {
     if (!user || !roomId) return;
 
     const unsub = subscribeToIncomingConnections(roomId, user.uid, (conn) => {
-      // Don't handle if already in a transfer
+      // Don't handle if already in an active transfer
       if (peerConnectionRef.current) return;
 
       setIncomingConnectionId(conn.connectionId);
       setIncomingInitiatorUid(conn.initiatorUid);
       setIncomingOffer(conn.offer ?? null);
+      if (conn.files && conn.files.length > 0) {
+        setIncomingFiles(conn.files);
+      }
       setHasIncoming(true);
     });
     unsubscribersRef.current.push(unsub);
@@ -176,9 +184,41 @@ export function useTransfer(roomId: string): UseTransferReturn {
       });
       peerConnectionRef.current = pc;
 
-      const { channel } = await pc.startAsInitiator();
-      
+      const filesMetadata = files.map((f) => ({
+        fileId: generateFileId(),
+        name: f.name,
+        size: f.size,
+        mimeType: f.type || 'application/octet-stream',
+      }));
+      const totalSize = files.reduce((s, f) => s + f.size, 0);
+
+      const { channel, connectionId } = await pc.startAsInitiator(filesMetadata, totalSize);
+
+      // Watchdog timeout: if channel doesn't open within 25 seconds, report timeout
+      const connectionTimer = window.setTimeout(() => {
+        if (channel.readyState !== 'open') {
+          setError('Connection timed out. Direct peer-to-peer connection could not be established.');
+          setIsConnecting(false);
+          setOutgoingStatus('failed');
+          cleanup();
+        }
+      }, 25000);
+      unsubscribersRef.current.push(() => window.clearTimeout(connectionTimer));
+
+      // Listen for rejection or cancellation by recipient
+      const unsubStatus = subscribeToConnection(roomId, connectionId, (conn) => {
+        if (conn?.status === 'rejected') {
+          window.clearTimeout(connectionTimer);
+          setError('Transfer was declined by the other device.');
+          setIsConnecting(false);
+          setOutgoingStatus('rejected');
+          setIsCompleted(true);
+        }
+      });
+      unsubscribersRef.current.push(unsubStatus);
+
       channel.onopen = () => {
+        window.clearTimeout(connectionTimer);
         setIsConnecting(false);
         setOutgoingStatus('transferring');
         setupFileTransfer(channel, 'sender');
@@ -192,7 +232,7 @@ export function useTransfer(roomId: string): UseTransferReturn {
       setIsConnecting(false);
       setRole(null);
     }
-  }, [user, roomId, setupFileTransfer]);
+  }, [user, roomId, setupFileTransfer, cleanup]);
 
   const acceptIncoming = useCallback(async () => {
     if (!user || !incomingConnectionId || !incomingOffer) return;
@@ -210,32 +250,43 @@ export function useTransfer(roomId: string): UseTransferReturn {
         onDataChannel: (channel) => {
           setIsConnecting(false);
           setupFileTransfer(channel, 'receiver');
-          // Accept happens after file-start is received via protocol
-          // The FileTransferManager handles the transfer-request and we tell it to accept
         },
         onConnectionStateChange: (state) => {
           if (state === 'failed' || state === 'closed') {
-            setError('Connection failed.');
+            setError('Connection failed. Could not establish direct P2P connection.');
             setIsConnecting(false);
           }
         },
       });
       peerConnectionRef.current = pc;
       await pc.startAsRecipient(incomingOffer);
+
+      // Watchdog timeout for receiver as well
+      const receiverTimer = window.setTimeout(() => {
+        if (peerConnectionRef.current && peerConnectionRef.current.getConnectionState() !== 'connected') {
+          setError('Connection timed out. Direct P2P connection could not be established.');
+          setIsConnecting(false);
+          cleanup();
+        }
+      }, 25000);
+      unsubscribersRef.current.push(() => window.clearTimeout(receiverTimer));
     } catch {
       setError('Failed to accept connection.');
       setIsConnecting(false);
       setRole(null);
     }
-  }, [user, roomId, incomingConnectionId, incomingInitiatorUid, incomingOffer, setupFileTransfer]);
+  }, [user, roomId, incomingConnectionId, incomingInitiatorUid, incomingOffer, setupFileTransfer, cleanup]);
 
-  const declineIncoming = useCallback(() => {
+  const declineIncoming = useCallback(async () => {
+    if (roomId && incomingConnectionId) {
+      await rejectConnection(roomId, incomingConnectionId);
+    }
     setHasIncoming(false);
     setIncomingConnectionId(null);
     setIncomingInitiatorUid(null);
     setIncomingOffer(null);
-    // We don't have a channel yet to send rejection, so just dismiss
-  }, []);
+    setIncomingFiles([]);
+  }, [roomId, incomingConnectionId]);
 
   const cancelTransfer = useCallback(() => {
     const manager = fileTransferRef.current;
