@@ -104,8 +104,8 @@ export default function RoomScreen() {
     if (navigator.share) {
       try {
         await navigator.share({
-          title: 'Join my ShareWave room',
-          text: `Beam files directly to me on ShareWave: Room ${roomId}`,
+          title: 'Join my Share room',
+          text: `Beam files directly to me on Share: Room ${roomId}`,
           url: inviteUrl,
         });
         return;

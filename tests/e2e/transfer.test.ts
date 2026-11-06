@@ -25,7 +25,7 @@ test.describe('P2P File Transfer', () => {
     try {
       // 1. Device A opens the app
       await pageA.goto('/');
-      await expect(pageA.locator('h1')).toContainText('ShareWave');
+      await expect(pageA.locator('h1')).toContainText('Share');
 
       // 2. Device A creates a room
       await pageA.getByRole('button', { name: /start sharing/i }).click();

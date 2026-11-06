@@ -15,14 +15,14 @@ function initAuth() {
   if (!store.deviceName) {
     let name = '';
     try {
-      name = sessionStorage.getItem('sharewave_device_name') || '';
+      name = sessionStorage.getItem('share_device_name') || sessionStorage.getItem('sharewave_device_name') || '';
     } catch {
       // Ignore
     }
     if (!name) {
       name = generateDeviceName();
       try {
-        sessionStorage.setItem('sharewave_device_name', name);
+        sessionStorage.setItem('share_device_name', name);
       } catch {
         // Ignore
       }

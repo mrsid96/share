@@ -55,7 +55,7 @@ export function AppShell({ children }: AppShellProps) {
     if (trimmed && trimmed !== deviceName) {
       setDeviceName(trimmed);
       try {
-        sessionStorage.setItem('sharewave_device_name', trimmed);
+        sessionStorage.setItem('share_device_name', trimmed);
       } catch {
         // ignore
       }
@@ -76,12 +76,12 @@ export function AppShell({ children }: AppShellProps) {
 
       {/* Floating glass header */}
       <header className="sticky top-0 z-40 border-b border-border/60 bg-surface/85 backdrop-blur-xl transition-colors">
-        <div className="mx-auto max-w-5xl flex items-center justify-between px-4 sm:px-6 py-3">
+        <div className="mx-auto max-w-6xl flex items-center justify-between px-4 sm:px-6 py-3">
           {/* Logo & Brand */}
           <Link
             to="/"
             className="group flex items-center gap-2.5 select-none focus:outline-none focus-visible:ring-2 focus-visible:ring-primary rounded-2xl"
-            aria-label="ShareWave Home"
+            aria-label="Share Home"
           >
             <div
               className="relative flex h-10 w-10 items-center justify-center rounded-2xl shadow-lg shadow-primary/25 transition-transform duration-200 group-hover:scale-105 group-active:scale-95 overflow-hidden"
@@ -92,9 +92,9 @@ export function AppShell({ children }: AppShellProps) {
             </div>
             <div className="flex flex-col">
               <span className="text-lg font-bold font-heading tracking-tight text-foreground flex items-center gap-1.5 leading-none">
-                ShareWave
+                Share
                 <span className="text-[10px] font-extrabold uppercase tracking-wider px-2 py-0.5 rounded-full bg-accent/15 text-accent border border-accent/20">
-                  Instant
+                  P2P
                 </span>
               </span>
               <span className="text-[11px] text-muted-foreground font-medium hidden sm:inline">
@@ -159,13 +159,13 @@ export function AppShell({ children }: AppShellProps) {
       </header>
 
       {/* Main Content Area */}
-      <main className="flex-1 mx-auto w-full max-w-5xl px-4 sm:px-6 py-5 md:py-8">
+      <main className="flex-1 mx-auto w-full max-w-6xl px-4 sm:px-6 py-5 md:py-8">
         {children}
       </main>
 
       {/* Welcoming Minimal Footer */}
       <footer className="border-t border-border/50 py-5 text-center text-xs text-muted-foreground pb-safe">
-        <div className="mx-auto max-w-5xl px-4 flex flex-col sm:flex-row items-center justify-between gap-3">
+        <div className="mx-auto max-w-6xl px-4 flex flex-col sm:flex-row items-center justify-between gap-3">
           <div className="flex items-center gap-2">
             <ShieldCheck className="h-4 w-4 text-emerald-500 shrink-0" />
             <span>Direct WebRTC encryption. Files never touch any server or cloud.</span>
