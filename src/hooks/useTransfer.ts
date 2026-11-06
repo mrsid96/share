@@ -8,6 +8,7 @@ import {
   rejectConnection,
 } from '../services/firebase/firestore.service';
 import { generateFileId } from '../utils/random-id';
+import { log } from '../utils/logger';
 import type { TransferProgress, ReceivedFile } from '../types/transfer';
 import type { TransferStatus } from '../types/transfer';
 
@@ -169,6 +170,7 @@ export function useTransfer(roomId: string): UseTransferReturn {
 
   const initiateTransfer = useCallback(async (files: File[], recipientUid: string) => {
     if (!user) return;
+    log.transfer(`Initiating transfer of ${files.length} file(s) to ${recipientUid}`);
     setRole('sender');
     setIsConnecting(true);
     setConnectionPhase('waiting-for-accept');
@@ -184,7 +186,7 @@ export function useTransfer(roomId: string): UseTransferReturn {
         localUid: user.uid,
         remoteUid: recipientUid,
         onAnswerReceived: () => {
-          // Recipient accepted! Transition from waiting to direct WebRTC connection
+          log.transfer(`Recipient clicked Accept! Transitioning to WebRTC direct connection phase`);
           if (acceptTimer) {
             window.clearTimeout(acceptTimer);
             acceptTimer = null;
@@ -193,6 +195,7 @@ export function useTransfer(roomId: string): UseTransferReturn {
 
           // Direct P2P connection timer
           webrtcTimer = window.setTimeout(() => {
+            log.error('Transfer', 'WebRTC direct connection phase timed out after 35s');
             setError('Direct peer-to-peer connection could not be established. Please check network connectivity.');
             setIsConnecting(false);
             setOutgoingStatus('failed');
@@ -201,6 +204,7 @@ export function useTransfer(roomId: string): UseTransferReturn {
         },
         onConnectionStateChange: (state) => {
           if (state === 'failed' || state === 'closed') {
+            log.error('Transfer', `PeerConnection state became '${state}' during transfer initiation`);
             if (acceptTimer) window.clearTimeout(acceptTimer);
             if (webrtcTimer) window.clearTimeout(webrtcTimer);
             setError('Connection failed. The devices could not connect directly.');
@@ -220,9 +224,11 @@ export function useTransfer(roomId: string): UseTransferReturn {
       const totalSize = files.reduce((s, f) => s + f.size, 0);
 
       const { channel, connectionId } = await pc.startAsInitiator(filesMetadata, totalSize);
+      log.transfer(`Signaling started: connectionId=${connectionId}, waiting for recipient to accept...`);
 
       // Recipient response timeout (60 seconds to tap Accept on their screen)
       acceptTimer = window.setTimeout(() => {
+        log.warn('Transfer', `Recipient did not respond within 60 seconds (conn=${connectionId})`);
         setError('Transfer request timed out. The recipient did not respond in time.');
         setIsConnecting(false);
         setOutgoingStatus('failed');
@@ -237,6 +243,7 @@ export function useTransfer(roomId: string): UseTransferReturn {
       // Listen for rejection by recipient
       const unsubStatus = subscribeToConnection(roomId, connectionId, (conn) => {
         if (conn?.status === 'rejected') {
+          log.transfer(`Recipient declined transfer ${connectionId}`);
           if (acceptTimer) window.clearTimeout(acceptTimer);
           if (webrtcTimer) window.clearTimeout(webrtcTimer);
           setError('Transfer was declined by the other device.');
@@ -248,6 +255,7 @@ export function useTransfer(roomId: string): UseTransferReturn {
       unsubscribersRef.current.push(unsubStatus);
 
       const handleChannelOpen = () => {
+        log.transfer(`DataChannel opened on sender! Ready to stream files.`);
         if (acceptTimer) window.clearTimeout(acceptTimer);
         if (webrtcTimer) window.clearTimeout(webrtcTimer);
         setConnectionPhase('idle');
@@ -265,7 +273,8 @@ export function useTransfer(roomId: string): UseTransferReturn {
       } else {
         channel.onopen = handleChannelOpen;
       }
-    } catch {
+    } catch (err) {
+      log.error('Transfer', 'Failed to initiate transfer:', err);
       if (acceptTimer) window.clearTimeout(acceptTimer);
       if (webrtcTimer) window.clearTimeout(webrtcTimer);
       setError('Failed to initiate connection. Please try again.');
@@ -277,12 +286,14 @@ export function useTransfer(roomId: string): UseTransferReturn {
 
   const acceptIncoming = useCallback(async () => {
     if (!user || !incomingConnectionId || !incomingOffer) return;
+    log.transfer(`User clicked Accept for incoming conn ${incomingConnectionId} from ${incomingInitiatorUid}`);
     setRole('receiver');
     setIsConnecting(true);
     setConnectionPhase('connecting-webrtc');
     setHasIncoming(false);
 
     let receiverTimer: number | null = window.setTimeout(() => {
+      log.error('Transfer', `Receiver WebRTC connection timed out after 35s`);
       setError('Direct peer-to-peer connection could not be established.');
       setIsConnecting(false);
       setConnectionPhase('idle');
@@ -301,6 +312,7 @@ export function useTransfer(roomId: string): UseTransferReturn {
         localUid: user.uid,
         remoteUid: incomingInitiatorUid ?? '',
         onDataChannel: (channel) => {
+          log.transfer(`Receiver DataChannel established! (readyState: ${channel.readyState})`);
           if (receiverTimer) {
             window.clearTimeout(receiverTimer);
             receiverTimer = null;
@@ -311,6 +323,7 @@ export function useTransfer(roomId: string): UseTransferReturn {
         },
         onConnectionStateChange: (state) => {
           if (state === 'failed' || state === 'closed') {
+            log.error('Transfer', `Receiver PeerConnection state became '${state}'`);
             if (receiverTimer) window.clearTimeout(receiverTimer);
             setError('Connection failed. Could not establish direct P2P connection.');
             setIsConnecting(false);
@@ -320,7 +333,8 @@ export function useTransfer(roomId: string): UseTransferReturn {
       });
       peerConnectionRef.current = pc;
       await pc.startAsRecipient(incomingOffer);
-    } catch {
+    } catch (err) {
+      log.error('Transfer', `Failed to accept incoming transfer:`, err);
       if (receiverTimer) window.clearTimeout(receiverTimer);
       setError('Failed to accept connection.');
       setIsConnecting(false);
@@ -330,6 +344,7 @@ export function useTransfer(roomId: string): UseTransferReturn {
   }, [user, roomId, incomingConnectionId, incomingInitiatorUid, incomingOffer, setupFileTransfer, cleanup]);
 
   const declineIncoming = useCallback(async () => {
+    log.transfer(`User clicked Decline for incoming conn ${incomingConnectionId}`);
     if (roomId && incomingConnectionId) {
       await rejectConnection(roomId, incomingConnectionId);
     }

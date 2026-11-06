@@ -18,6 +18,7 @@ import type { Room, RoomMember } from '../../types/room';
 import type { RTCSignalingConnection } from '../../types/webrtc';
 import { generateRoomId, generateConnectionId } from '../../utils/random-id';
 import { detectDeviceType } from '../../utils/device-detection';
+import { log } from '../../utils/logger';
 
 const ROOM_LIFETIME_MS = 2 * 60 * 60 * 1000; // 2 hours
 const HEARTBEAT_INTERVAL_MS = 45_000;
@@ -154,6 +155,12 @@ export async function createSignalingConnection(
     type: offer.type,
     sdp: offer.sdp,
   };
+  log.signaling(`Creating connection ${connectionId} for room ${roomId}`, {
+    initiatorUid,
+    recipientUid,
+    filesCount: files?.length ?? 0,
+    totalSize,
+  });
   await setDoc(doc(db, 'rooms', roomId, 'connections', connectionId), {
     initiatorUid,
     recipientUid,
@@ -165,6 +172,7 @@ export async function createSignalingConnection(
     createdAt: Timestamp.fromMillis(now),
     expiresAt: Timestamp.fromMillis(now + 10 * 60 * 1000), // 10 min signaling TTL
   });
+  log.signaling(`Connection ${connectionId} document written to Firestore`);
   return connectionId;
 }
 
@@ -177,22 +185,25 @@ export async function submitAnswer(
     type: answer.type,
     sdp: answer.sdp,
   };
+  log.signaling(`Submitting answer for connection ${connectionId} in room ${roomId}`);
   await updateDoc(doc(db, 'rooms', roomId, 'connections', connectionId), {
     answer: plainAnswer,
     status: 'active',
   });
+  log.signaling(`Answer submitted successfully for connection ${connectionId}`);
 }
 
 export async function rejectConnection(
   roomId: string,
   connectionId: string
 ): Promise<void> {
+  log.signaling(`Rejecting connection ${connectionId} in room ${roomId}`);
   try {
     await updateDoc(doc(db, 'rooms', roomId, 'connections', connectionId), {
       status: 'rejected',
     });
-  } catch {
-    // Non-fatal
+  } catch (err) {
+    log.error('Signaling', `Failed to reject connection ${connectionId}:`, err);
   }
 }
 
@@ -201,6 +212,7 @@ export async function addInitiatorCandidate(
   connectionId: string,
   candidate: RTCIceCandidateInit
 ): Promise<void> {
+  log.signaling(`Uploading initiator ICE candidate for conn ${connectionId}:`, candidate.candidate?.slice(0, 40));
   await addDoc(
     collection(db, 'rooms', roomId, 'connections', connectionId, 'initiatorCandidates'),
     { candidate, createdAt: Timestamp.fromMillis(Date.now()) }
@@ -212,6 +224,7 @@ export async function addRecipientCandidate(
   connectionId: string,
   candidate: RTCIceCandidateInit
 ): Promise<void> {
+  log.signaling(`Uploading recipient ICE candidate for conn ${connectionId}:`, candidate.candidate?.slice(0, 40));
   await addDoc(
     collection(db, 'rooms', roomId, 'connections', connectionId, 'recipientCandidates'),
     { candidate, createdAt: Timestamp.fromMillis(Date.now()) }
@@ -223,17 +236,19 @@ export function subscribeToAnswer(
   connectionId: string,
   callback: (answer: RTCSessionDescriptionInit) => void
 ): () => void {
+  log.signaling(`Subscribing to answer for connection ${connectionId}`);
   return onSnapshot(
     doc(db, 'rooms', roomId, 'connections', connectionId),
     (snap) => {
       if (!snap.exists()) return;
       const data = snap.data();
       if (data.answer) {
+        log.signaling(`Received answer from recipient for connection ${connectionId}`);
         callback(data.answer as RTCSessionDescriptionInit);
       }
     },
     (err) => {
-      console.warn('subscribeToAnswer warning:', err.message);
+      log.warn('Signaling', `subscribeToAnswer warning: ${err.message}`);
     }
   );
 }
@@ -243,17 +258,20 @@ export function subscribeToRecipientCandidates(
   connectionId: string,
   callback: (candidate: RTCIceCandidateInit) => void
 ): () => void {
+  log.signaling(`Subscribing to recipient candidates for connection ${connectionId}`);
   return onSnapshot(
     collection(db, 'rooms', roomId, 'connections', connectionId, 'recipientCandidates'),
     (snap) => {
       snap.docChanges().forEach((change) => {
         if (change.type === 'added') {
-          callback(change.doc.data().candidate as RTCIceCandidateInit);
+          const cand = change.doc.data().candidate as RTCIceCandidateInit;
+          log.signaling(`Received remote recipient candidate for ${connectionId}:`, cand.candidate?.slice(0, 40));
+          callback(cand);
         }
       });
     },
     (err) => {
-      console.warn('subscribeToRecipientCandidates warning:', err.message);
+      log.warn('Signaling', `subscribeToRecipientCandidates warning: ${err.message}`);
     }
   );
 }
@@ -263,17 +281,20 @@ export function subscribeToInitiatorCandidates(
   connectionId: string,
   callback: (candidate: RTCIceCandidateInit) => void
 ): () => void {
+  log.signaling(`Subscribing to initiator candidates for connection ${connectionId}`);
   return onSnapshot(
     collection(db, 'rooms', roomId, 'connections', connectionId, 'initiatorCandidates'),
     (snap) => {
       snap.docChanges().forEach((change) => {
         if (change.type === 'added') {
-          callback(change.doc.data().candidate as RTCIceCandidateInit);
+          const cand = change.doc.data().candidate as RTCIceCandidateInit;
+          log.signaling(`Received remote initiator candidate for ${connectionId}:`, cand.candidate?.slice(0, 40));
+          callback(cand);
         }
       });
     },
     (err) => {
-      console.warn('subscribeToInitiatorCandidates warning:', err.message);
+      log.warn('Signaling', `subscribeToInitiatorCandidates warning: ${err.message}`);
     }
   );
 }
@@ -291,6 +312,7 @@ export function subscribeToConnection(
         return;
       }
       const data = snap.data();
+      log.signaling(`Connection status update for ${connectionId}: status=${data.status}`);
       callback({
         connectionId: snap.id,
         initiatorUid: data.initiatorUid,
@@ -305,7 +327,7 @@ export function subscribeToConnection(
       });
     },
     (err) => {
-      console.warn('subscribeToConnection warning:', err.message);
+      log.warn('Signaling', `subscribeToConnection warning: ${err.message}`);
     }
   );
 }
@@ -315,14 +337,17 @@ export function subscribeToIncomingConnections(
   uid: string,
   callback: (conn: RTCSignalingConnection) => void
 ): () => void {
+  log.signaling(`Subscribing to incoming connections for user ${uid} in room ${roomId}`);
   const connectionsRef = collection(db, 'rooms', roomId, 'connections');
   const q = query(connectionsRef, where('recipientUid', '==', uid), where('status', '==', 'pending'));
   return onSnapshot(
     q,
     (snap) => {
+      log.signaling(`Incoming connections snapshot: ${snap.docChanges().length} change(s)`);
       snap.docChanges().forEach((change) => {
         if (change.type === 'added') {
           const data = change.doc.data();
+          log.signaling(`Incoming transfer detected: conn=${change.doc.id}, from=${data.initiatorUid}, files=${data.files?.length ?? 0}`);
           callback({
             connectionId: change.doc.id,
             initiatorUid: data.initiatorUid,
@@ -339,7 +364,7 @@ export function subscribeToIncomingConnections(
       });
     },
     (err) => {
-      console.warn('subscribeToIncomingConnections notice:', err.message);
+      log.warn('Signaling', `subscribeToIncomingConnections notice: ${err.message}`);
     }
   );
 }

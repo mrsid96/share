@@ -4,6 +4,7 @@ import { parseTransferMessage, sanitizeFilename } from '../../utils/validation';
 import { generateTransferId, generateFileId } from '../../utils/random-id';
 import { PROTOCOL_VERSION, type TransferMessage } from '../../types/webrtc';
 import type { FileMetadata, ReceivedFile, TransferProgress } from '../../types/transfer';
+import { log } from '../../utils/logger';
 
 const BUFFER_HIGH_WATERMARK = 1024 * 1024; // 1 MB
 const BUFFER_LOW_WATERMARK = 256 * 1024;   // 256 KB
@@ -73,6 +74,8 @@ export class FileTransferManager {
   }
 
   private setupChannelHandlers(): void {
+    log.transfer(`Setting up DataChannel event handlers (channel readyState: ${this.channel.readyState})`);
+
     this.channel.onmessage = (event) => {
       if (typeof event.data === 'string') {
         this.handleControlMessage(event.data);
@@ -81,7 +84,8 @@ export class FileTransferManager {
       }
     };
 
-    this.channel.onerror = (_event) => {
+    this.channel.onerror = (event) => {
+      log.error('Transfer', 'DataChannel encountered an error:', event);
       this.emit({
         type: 'failed',
         transferId: this.currentSendTransferId || this.receivingTransferId,
@@ -90,6 +94,7 @@ export class FileTransferManager {
     };
 
     this.channel.onclose = () => {
+      log.transfer(`DataChannel closed (sending: ${this.sending}, cancelled: ${this.cancelled})`);
       if (this.sending && !this.cancelled) {
         this.emit({
           type: 'failed',
@@ -102,8 +107,10 @@ export class FileTransferManager {
 
   private sendControl(msg: TransferMessage): void {
     if (this.channel.readyState !== 'open') {
+      log.error('Transfer', `Cannot send control message '${msg.type}': channel is '${this.channel.readyState}'`);
       throw new Error('DataChannel is not open');
     }
+    log.transfer(`Sending control message: type=${msg.type}, transferId=${msg.transferId}`);
     this.channel.send(JSON.stringify(msg));
   }
 
@@ -112,11 +119,17 @@ export class FileTransferManager {
     try {
       parsed = JSON.parse(raw);
     } catch {
-      return; // Ignore malformed JSON
+      log.warn('Transfer', 'Ignoring malformed JSON message from DataChannel');
+      return;
     }
 
     const msg = parseTransferMessage(parsed);
-    if (!msg) return;
+    if (!msg) {
+      log.warn('Transfer', 'Ignoring unparseable or unsupported protocol message');
+      return;
+    }
+
+    log.transfer(`Received control message: type=${msg.type}, transferId=${msg.transferId}`);
 
     switch (msg.type) {
       case 'transfer-request':
@@ -124,32 +137,39 @@ export class FileTransferManager {
         this.totalBytes = msg.files.reduce((s, f) => s + f.size, 0);
         this.totalBytesReceived = 0;
         this.receivedFiles = [];
+        log.transfer(`Incoming transfer request: ${msg.files.length} file(s), total ${this.totalBytes} bytes`);
         this.emit({ type: 'transfer-request', transferId: msg.transferId, request: { transferId: msg.transferId, files: msg.files } });
         break;
 
       case 'transfer-accepted':
+        log.transfer(`Transfer accepted by recipient. Initiating stream...`);
         this.emit({ type: 'transfer-accepted', transferId: msg.transferId });
         this.startSending();
         break;
 
       case 'transfer-rejected':
+        log.transfer(`Transfer rejected by recipient`);
         this.sending = false;
         this.emit({ type: 'transfer-rejected', transferId: msg.transferId });
         break;
 
       case 'file-start':
+        log.transfer(`Receiving file-start: name="${msg.name}", size=${msg.size} bytes`);
         this.handleFileStart(msg);
         break;
 
       case 'file-end':
+        log.transfer(`Receiving file-end: fileId=${msg.fileId}`);
         this.handleFileEnd(msg);
         break;
 
       case 'transfer-complete':
+        log.transfer(`Transfer complete! Received ${this.receivedFiles.length} file(s)`);
         this.emit({ type: 'completed', transferId: msg.transferId, files: this.receivedFiles });
         break;
 
       case 'transfer-cancelled':
+        log.transfer(`Transfer cancelled by remote peer`);
         this.emit({ type: 'cancelled', transferId: msg.transferId });
         break;
     }
@@ -266,6 +286,7 @@ export class FileTransferManager {
     this.sending = false;
     this.cancelled = false;
 
+    log.transfer(`Requesting transfer ${transferId} with ${files.length} file(s)`);
     this.sendControl({
       type: 'transfer-request',
       version: PROTOCOL_VERSION,
@@ -280,6 +301,7 @@ export class FileTransferManager {
    * Accepts an incoming transfer (receiver calls this).
    */
   acceptTransfer(transferId: string): void {
+    log.transfer(`Accepting transfer ${transferId} via DataChannel control protocol`);
     this.sendControl({ type: 'transfer-accepted', version: PROTOCOL_VERSION, transferId });
   }
 
@@ -287,6 +309,7 @@ export class FileTransferManager {
    * Rejects an incoming transfer (receiver calls this).
    */
   rejectTransfer(transferId: string): void {
+    log.transfer(`Rejecting transfer ${transferId} via DataChannel control protocol`);
     this.sendControl({ type: 'transfer-rejected', version: PROTOCOL_VERSION, transferId });
   }
 
@@ -294,6 +317,7 @@ export class FileTransferManager {
    * Cancels an in-progress transfer (either side).
    */
   cancelTransfer(transferId: string): void {
+    log.transfer(`Cancelling transfer ${transferId}`);
     this.cancelled = true;
     this.sending = false;
     this.sendControl({ type: 'transfer-cancelled', version: PROTOCOL_VERSION, transferId });
@@ -308,6 +332,7 @@ export class FileTransferManager {
     this.sending = true;
     const transferId = this.currentSendTransferId;
     const totalBytes = this.sendQueue.reduce((s, q) => s + q.meta.size, 0);
+    log.transfer(`Streaming started: ${this.sendQueue.length} file(s), total ${totalBytes} bytes`);
     let totalBytesSent = 0;
     const speedSamples: Array<{ bytes: number; time: number }> = [];
 
