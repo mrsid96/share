@@ -13,15 +13,35 @@ import { log } from '../../utils/logger';
 export type ConnectionRole = 'initiator' | 'recipient';
 
 // Multi-provider STUN pool with candidate pre-fetching for instant NAT discovery
-const RTC_CONFIG: RTCConfiguration = {
-  iceServers: [
+function getIceServers(): RTCIceServer[] {
+  const servers: RTCIceServer[] = [
     { urls: 'stun:stun.l.google.com:19302' },
     { urls: 'stun:stun1.l.google.com:19302' },
     { urls: 'stun:stun2.l.google.com:19302' },
     { urls: 'stun:stun.cloudflare.com:3478' },
     { urls: 'stun:global.stun.twilio.com:3478' },
     { urls: 'stun:stun.relay.metered.ca:80' },
-  ],
+  ];
+
+  // Optional custom or free Metered/Cloudflare TURN server from env
+  const turnUrl = import.meta.env.VITE_TURN_URL;
+  const turnUsername = import.meta.env.VITE_TURN_USERNAME;
+  const turnCredential = import.meta.env.VITE_TURN_CREDENTIAL;
+
+  if (turnUrl && turnUsername && turnCredential) {
+    servers.push({
+      urls: turnUrl.split(',').map((u: string) => u.trim()),
+      username: turnUsername,
+      credential: turnCredential,
+    });
+    log.webrtc('Configured custom TURN relay server for NAT traversal');
+  }
+
+  return servers;
+}
+
+const RTC_CONFIG: RTCConfiguration = {
+  iceServers: getIceServers(),
   iceCandidatePoolSize: 10,
   iceTransportPolicy: 'all',
 };
