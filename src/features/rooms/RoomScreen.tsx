@@ -191,7 +191,7 @@ export default function RoomScreen() {
 
   return (
     <AppShell>
-      <div className="flex flex-col gap-5 sm:gap-6 max-w-5xl mx-auto pb-24 sm:pb-8">
+      <div className="flex flex-col gap-5 sm:gap-6 max-w-5xl mx-auto pb-6 sm:pb-8">
         {/* Top Floating Control Bar */}
         <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 p-3.5 sm:p-4 rounded-3xl bg-surface border border-border/80 shadow-xs">
           <div className="flex items-center justify-between sm:justify-start gap-3">
@@ -444,7 +444,7 @@ export default function RoomScreen() {
                 onRemoveFile={handleRemoveFile}
               />
 
-              {/* In-Card Primary Send Button */}
+              {/* Primary Send Button */}
               <Button
                 variant="default"
                 size="lg"
@@ -468,40 +468,18 @@ export default function RoomScreen() {
                     <Send className="mr-2 h-5 w-5" />
                     Send {selectedFiles.length > 0 ? `${selectedFiles.length} File${selectedFiles.length !== 1 ? 's' : ''}` : 'Files'}
                     {totalSelectedSize > 0 && ` (${formatBytes(totalSelectedSize)})`}
+                    {recipientDevice && (
+                      <span className="truncate max-w-[140px] ml-1 opacity-90 font-bold">
+                        to {recipientDevice.deviceName}
+                      </span>
+                    )}
+                    <ArrowRight className="ml-1 h-4 w-4" />
                   </>
                 )}
               </Button>
             </Card>
           </div>
         </div>
-
-        {/* Mobile-First Floating Sticky Bottom Action Pill */}
-        {/* Displays when files are staged and recipient is chosen on mobile screens */}
-        {selectedFiles.length > 0 && selectedRecipientUid && (
-          <div className="fixed bottom-0 inset-x-0 p-4 pb-safe bg-surface/90 backdrop-blur-xl border-t border-border/80 z-30 lg:hidden shadow-2xl animate-in slide-in-from-bottom duration-200">
-            <Button
-              variant="default"
-              size="lg"
-              className="w-full h-14 font-extrabold text-base shadow-xl shadow-primary/30 active:scale-95"
-              disabled={isConnecting || outgoingStatus === 'transferring'}
-              onClick={handleSendFiles}
-              aria-label="Send Files"
-            >
-              {isConnecting ? (
-                <>
-                  <Loader2 className="mr-2 h-5 w-5 animate-spin" />
-                  Sending...
-                </>
-              ) : (
-                <>
-                  <Send className="mr-2 h-5 w-5" />
-                  Send {selectedFiles.length} file{selectedFiles.length !== 1 ? 's' : ''} to {recipientDevice?.deviceName || 'Device'}
-                  <ArrowRight className="ml-1.5 h-4 w-4" />
-                </>
-              )}
-            </Button>
-          </div>
-        )}
       </div>
     </AppShell>
   );
